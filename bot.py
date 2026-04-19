@@ -1,6 +1,7 @@
 import os
 import telebot
 import threading
+import time
 from flask import Flask
 from pymongo import MongoClient
 
@@ -15,7 +16,7 @@ client = MongoClient(MONGO_URI)
 db = client['broadcast_db']
 channels_col = db['channels']
 
-# --- डमी वेब सर्व्हर (रेंडरला खूश ठेवण्यासाठी) ---
+# --- डमी वेब सर्व्हर (रेंडरसाठी) ---
 app = Flask(__name__)
 @app.route('/')
 def home():
@@ -25,7 +26,7 @@ def run_server():
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
 
-# --- चॅनेल ॲड करा (/add -100xxxx) ---
+# --- चॅनेल ॲड करा ---
 @bot.message_handler(commands=['add'])
 def add_channel(message):
     try:
@@ -42,7 +43,7 @@ def add_channel(message):
     except Exception as e:
         bot.reply_to(message, f"❌ एरर: {e}")
 
-# --- लिस्ट बघा (/list) ---
+# --- लिस्ट बघा ---
 @bot.message_handler(commands=['list'])
 def list_channels(message):
     channels = list(channels_col.find())
@@ -54,7 +55,7 @@ def list_channels(message):
         msg += f"{i}. `{c['chat_id']}`\n"
     bot.reply_to(message, msg, parse_mode="Markdown")
 
-# --- मेसेज ब्रॉडकास्ट करा ---
+# --- मेसेज ब्रॉडकास्ट ---
 @bot.message_handler(content_types=['text', 'photo', 'video', 'document', 'audio'])
 def broadcast(message):
     if message.text and message.text.startswith('/'):
@@ -73,7 +74,15 @@ def broadcast(message):
     bot.reply_to(message, f"✅ {success} चॅनेलवर मेसेज पाठवला!")
 
 if __name__ == "__main__":
-    # वेब सर्व्हर वेगळ्या थ्रेडमध्ये सुरू करा
+    # ४०९ एरर कायमचा घालवण्यासाठी: जुने कनेक्शन्स तोडा
+    try:
+        bot.remove_webhook()
+        time.sleep(2)
+    except:
+        pass
+
+    # वेब सर्व्हर सुरू करा
     threading.Thread(target=run_server).start()
-    # बॉट सुरू करा
-    bot.infinity_polling()
+    
+    # बॉट सुरू करा (जुने अडकलेले मेसेज सोडून द्या)
+    bot.infinity_polling(skip_pending=True)
