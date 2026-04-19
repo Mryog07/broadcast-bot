@@ -1,17 +1,33 @@
 import os
 import asyncio
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pyrogram import Client, filters
 from motor.motor_asyncio import AsyncIOMotorClient
 
-# रेंडरवरील Variables (हे तू आधीच सेट केले आहेत)
+# --- रेंडरला फसवण्यासाठी Dummy Web Server ---
+class DummyHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"Bot is alive and running!")
+
+def run_dummy_server():
+    port = int(os.environ.get("PORT", 10000))
+    server = HTTPServer(('0.0.0.0', port), DummyHandler)
+    server.serve_forever()
+
+threading.Thread(target=run_dummy_server, daemon=True).start()
+# ----------------------------------------------
+
+# रेंडरवरील Variables
 BOT_TOKEN = os.environ.get("API_TOKEN")
 MONGO_URL = os.environ.get("MONGO_URI")
 ADMIN_ID = int(os.environ.get("ADMIN_ID"))
 
-# --- तुझे खरे आकडे ---
+# तुझे खरे आकडे
 API_ID = 30767171  
 API_HASH = "af363a055e5c68096847d64871c758c5"  
-# ---------------------------
 
 app = Client("broadcast_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 mongo_client = AsyncIOMotorClient(MONGO_URL)
