@@ -1,52 +1,58 @@
 import os
 import telebot
-from flask import Flask
-from threading import Thread
+from pymongo import MongoClient
 
-# १. रेंडरसाठी वेब सर्व्हर (Ping Logic)
-app = Flask('')
+# Environment Variables मिळवणे
+API_TOKEN = os.getenv('API_TOKEN')
+MONGO_URI = os.getenv('MONGO_URI')
 
-@app.route('/')
-def home():
-    return "Bot is Running!"
+bot = telebot.TeleBot(API_TOKEN)
 
-def run():
-    # रेंडर पोर्ट आपोआप डिटेक्ट करेल
-    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
+# MongoDB जोडणी (Connection)
+client = MongoClient(MONGO_URI)
+db = client['broadcast_db']
+channels_col = db['channels']
 
-def keep_alive():
-    t = Thread(target=run)
-    t.start()
+# चॅनेल ॲड करण्याची कमांड
+@bot.message_handler(commands=['add'])
+def add_channel(message):
+    try:
+        args = message.text.split()
+        if len(args) < 2:
+            bot.reply_to(message, "📖 वापर: /add -100xxxxxxxx")
+            return
+            
+        chat_id = args[1].strip()
+        if channels_col.find_one({'chat_id': chat_id}):
+            bot.reply_to(message, "⚠️ हा चॅनेल आधीच लिस्टमध्ये आहे.")
+        else:
+            channels_col.insert_one({'chat_id': chat_id})
+            bot.reply_to(message, f"✅ यशस्वीरित्या ॲड झाला: {chat_id}")
+    except Exception as e:
+        bot.reply_to(message, f"❌ एरर: {e}")
 
-# २. बॉट सेटअप (Environment Variables मधून डेटा घेईल)
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-ADMIN_ID = int(os.getenv("ADMIN_ID"))
-# चॅनेल्सची लिस्ट स्वल्पविरामाने (comma) वेगळी केली आहे
-CHANNELS = [int(i.strip()) for i in os.getenv("CHANNELS").split(",")]
+# चॅनेल्सची लिस्ट बघणे
+@bot.message_handler(commands=['list'])
+def list_channels(message):
+    channels = list(channels_col.find())
+    if not channels:
+        bot.reply_to(message, "📪 अजून एकही चॅनेल ॲड केलेला नाही.")
+        return
+    
+    msg = "📋 तुमचे चॅनेल्स:\n\n"
+    for i, c in enumerate(channels, 1):
+        msg += f"{i}. {c['chat_id']}\n"
+    bot.reply_to(message, msg)
 
-bot = telebot.TeleBot(BOT_TOKEN)
-
-# ३. ब्रॉडकास्ट फंक्शन (फक्त ॲडमिनसाठी)
-@bot.message_handler(func=lambda message: message.from_user.id == ADMIN_ID, 
-                     content_types=['text', 'photo', 'video', 'document', 'audio', 'voice', 'animation'])
+# मेसेज फॉरवर्ड करणे (Broadcast)
+@bot.message_handler(content_types=['text', 'photo', 'video', 'document', 'audio'])
 def broadcast(message):
-    status_msg = bot.reply_to(message, "⏳ Broadcasting सुरू आहे...")
-    success = 0
-    failed = 0
-    
-    for chat_id in CHANNELS:
-        try:
-            # copy_message फंक्शन मेसेजला 'same to same' पाठवतं
-            bot.copy_message(chat_id, message.chat.id, message.message_id)
-            success += 1
-        except Exception as e:
-            print(f"Error on {chat_id}: {e}")
-            failed += 1
-    
-    bot.edit_message_text(f"✅ पोस्ट पाठवून झाली आहे!\n\nयशस्वी: {success}\nअपयशी: {failed}", 
-                          status_msg.chat.id, status_msg.message_id)
+    if message.text and message.text.startswith('/'):
+        return
 
-if __name__ == "__main__":
-    print("बॉट सुरू होत आहे...")
-    keep_alive() # वेब सर्व्हर सुरू करतोय
-    bot.infinity_polling()
+    all_channels = list(channels_col.find())
+    for c in all_channels:
+        try:
+            bot.copy_message(c['chat_id'], message.chat.id, message.message_id)
+        except:
+            pass
