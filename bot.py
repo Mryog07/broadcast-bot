@@ -8,9 +8,9 @@ BOT_TOKEN = os.environ.get("API_TOKEN")
 MONGO_URL = os.environ.get("MONGO_URI")
 ADMIN_ID = int(os.environ.get("ADMIN_ID"))
 
-# --- इथे तुझे खरे आकडे टाक ---
-API_ID = 30767171  # तुझा 8 आकडी API ID इथे टाक
-API_HASH = "af363a055e5c68096847d64871c758c5"  # तुझा API Hash इथे टाक (अवतरण चिन्ह "" राहू दे)
+# --- तुझे खरे आकडे ---
+API_ID = 30767171  
+API_HASH = "af363a055e5c68096847d64871c758c5"  
 # ---------------------------
 
 app = Client("broadcast_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
@@ -85,6 +85,6 @@ async def main():
     print("बॉट सुरू झाला आहे... 🚀")
     await asyncio.Event().wait()
 
-if name == "main":
+if __name__ == "__main__":
     loop = asyncio.get_event_loop()
     loop.run_until_complete(main())
