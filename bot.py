@@ -1,88 +1,86 @@
 import os
-import telebot
-import threading
-import time
-from flask import Flask
-from pymongo import MongoClient
+from pyrogram import Client, filters
+from motor.motor_asyncio import AsyncIOMotorClient
 
-# Environment Variables
-API_TOKEN = os.getenv('API_TOKEN')
-MONGO_URI = os.getenv('MONGO_URI')
+# रेंडरवरील वेरिएबल्स
+BOT_TOKEN = os.environ.get("API_TOKEN")
+MONGO_URL = os.environ.get("MONGO_URI")
+ADMIN_ID = int(os.environ.get("ADMIN_ID"))
 
-bot = telebot.TeleBot(API_TOKEN)
+# टेलिग्राम अधिकृत API Keys
+API_ID = 22247348 
+API_HASH = "8706856012351235b2e564751235" 
 
-# MongoDB Connection
-client = MongoClient(MONGO_URI)
-db = client['broadcast_db']
-channels_col = db['channels']
+app = Client("broadcast_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+mongo_client = AsyncIOMotorClient(MONGO_URL)
+db = mongo_client.broadcast_db
+channels_col = db.channels # चॅनेल आयडी सेव्ह करण्यासाठी
+msg_col = db.messages # डिलीट फीचरसाठी
 
-# --- डमी वेब सर्व्हर (रेंडरसाठी) ---
-app = Flask(__name__)
-@app.route('/')
-def home():
-    return "Bot is running!"
+# --- १. स्टार्ट आणि हेल्प ---
+@app.on_message(filters.private & filters.command("start"))
+async def start(client, message):
+    await message.reply_text(
+        "👋 **MTC ब्रॉडकास्ट बॉटमध्ये स्वागत आहे!**\n\n"
+        "🔹 **चॅनेल ॲड करण्यासाठी:** चॅनेलची एखादी पोस्ट मला फॉरवर्ड करा.\n"
+        "🔹 **ब्रॉडकास्टसाठी:** कोणताही मेसेज पाठवा, तो सर्व ॲड केलेल्या चॅनेल्सवर जाईल.\n"
+        "🔹 **कमांड्स:** /stats, /delete, /clean"
+    )
 
-def run_server():
-    port = int(os.environ.get("PORT", 8080))
-    app.run(host="0.0.0.0", port=port)
+# --- २. चॅनेल ॲड करण्याचे लॉजिक (फॉरवर्ड करून) ---
+@app.on_message(filters.private & filters.user(ADMIN_ID) & filters.forwarded)
+async def add_channel(client, message):
+    if message.forward_from_chat:
+        chat_id = message.forward_from_chat.id
+        chat_title = message.forward_from_chat.title
+        
+        await channels_col.update_one(
+            {"chat_id": chat_id}, 
+            {"$set": {"title": chat_title}}, 
+            upsert=True
+        )
+        await message.reply_text(f"✅ **चॅनेल यशस्वीरित्या ॲड झाले!**\n\n📢 नाव: {chat_title}\n🆔 ID: `{chat_id}`")
+    else:
+        await message.reply_text("❌ कृपया चॅनेलचा मेसेज फॉरवर्ड करा (युजरचा नाही).")
 
-# --- चॅनेल ॲड करा ---
-@bot.message_handler(commands=['add'])
-def add_channel(message):
-    try:
-        args = message.text.split()
-        if len(args) < 2:
-            bot.reply_to(message, "📖 वापर: `/add -100xxxxxxxx`", parse_mode="Markdown")
-            return
-        chat_id = args[1].strip()
-        if channels_col.find_one({'chat_id': chat_id}):
-            bot.reply_to(message, "⚠️ हा चॅनेल आधीच लिस्टमध्ये आहे.")
-        else:
-            channels_col.insert_one({'chat_id': chat_id})
-            bot.reply_to(message, f"✅ यशस्वीरित्या ॲड झाला: `{chat_id}`", parse_mode="Markdown")
-    except Exception as e:
-        bot.reply_to(message, f"❌ एरर: {e}")
+# --- ३. स्टेट्स आणि क्लिन ---
+@app.on_message(filters.private & filters.command("stats"))
+async def stats(client, message):
+    count = await channels_col.count_documents({})
+    await message.reply_text(f"📊 **स्टेटस:**\n✅ सध्या {count} चॅनेल्स ब्रॉडकास्टसाठी जोडले आहेत.")
 
-# --- लिस्ट बघा ---
-@bot.message_handler(commands=['list'])
-def list_channels(message):
-    channels = list(channels_col.find())
+@app.on_message(filters.private & filters.command("clean"))
+async def clean_database(client, message):
+    await channels_col.delete_many({})
+    await message.reply_text("🗑️ सर्व जुने चॅनेल आयडी डेटाबेसमधून हटवले आहेत. आता नवीन ॲड करा.")
+
+# --- ४. ब्रॉडकास्ट आणि डिलीट ---
+@app.on_message(filters.private & filters.user(ADMIN_ID) & ~filters.command(["start", "stats", "delete", "clean"]))
+async def start_broadcast(client, message):
+    channels = await channels_col.find().to_list(length=100)
     if not channels:
-        bot.reply_to(message, "📪 अजून एकही चॅनेल ॲड केलेला नाही.")
-        return
-    msg = "📋 **तुमचे चॅनेल्स:**\n\n"
-    for i, c in enumerate(channels, 1):
-        msg += f"{i}. `{c['chat_id']}`\n"
-    bot.reply_to(message, msg, parse_mode="Markdown")
+        return await message.reply_text("❌ आधी चॅनेल ॲड करा! (चॅनेलची एखादी पोस्ट फॉरवर्ड करा)")
 
-# --- मेसेज ब्रॉडकास्ट ---
-@bot.message_handler(content_types=['text', 'photo', 'video', 'document', 'audio'])
-def broadcast(message):
-    if message.text and message.text.startswith('/'):
-        return
-    all_channels = list(channels_col.find())
-    if not all_channels:
-        bot.reply_to(message, "❌ आधी चॅनेल ॲड करा! (/add)")
-        return
-    success = 0
-    for c in all_channels:
+    sent_ids = []
+    for ch in channels:
         try:
-            bot.copy_message(c['chat_id'], message.chat.id, message.message_id)
-            success += 1
-        except:
-            pass
-    bot.reply_to(message, f"✅ {success} चॅनेलवर मेसेज पाठवला!")
-
-if __name__ == "__main__":
-    # ४०९ एरर कायमचा घालवण्यासाठी: जुने कनेक्शन्स तोडा
-    try:
-        bot.remove_webhook()
-        time.sleep(2)
-    except:
-        pass
-
-    # वेब सर्व्हर सुरू करा
-    threading.Thread(target=run_server).start()
+            sent = await message.copy(ch['chat_id'])
+            sent_ids.append([ch['chat_id'], sent.id])
+        except: pass
     
-    # बॉट सुरू करा (जुने अडकलेले मेसेज सोडून द्या)
-    bot.infinity_polling(skip_pending=True)
+    await msg_col.update_one({"admin_id": ADMIN_ID}, {"$set": {"sent_ids": sent_ids}}, upsert=True)
+    await message.reply_text(f"✅ {len(sent_ids)} चॅनेल्सवर मेसेज पाठवला!\nडिलीट करण्यासाठी /delete दाबा.")
+
+@app.on_message(filters.private & filters.command("delete"))
+async def delete_broadcast(client, message):
+    data = await msg_col.find_one({"admin_id": ADMIN_ID})
+    if data:
+        for chat_id, msg_id in data["sent_ids"]:
+            try: await client.delete_messages(chat_id, msg_id)
+            except: pass
+        await msg_col.delete_one({"admin_id": ADMIN_ID})
+        await message.reply_text("🗑️ सर्व चॅनेल्सवरून पोस्ट डिलीट केली!")
+    else:
+        await message.reply_text("❌ डिलीट करण्यासाठी कोणतीही पोस्ट सापडली नाही.")
+
+app.run()
