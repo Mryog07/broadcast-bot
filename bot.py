@@ -5,12 +5,12 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pyrogram import Client, filters
 from motor.motor_asyncio import AsyncIOMotorClient
 
-# --- रेंडरला फसवण्यासाठी Dummy Web Server ---
+# --- रेंडरसाठी Dummy Web Server ---
 class DummyHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.end_headers()
-        self.wfile.write(b"Bot is alive and running!")
+        self.wfile.write(b"MTC Multi-Bot is alive!")
 
 def run_dummy_server():
     port = int(os.environ.get("PORT", 10000))
@@ -20,85 +20,101 @@ def run_dummy_server():
 threading.Thread(target=run_dummy_server, daemon=True).start()
 # ----------------------------------------------
 
-# रेंडरवरील Variables
+# रेंडरवरील Variables (काहीही बदलायची गरज नाही)
 BOT_TOKEN = os.environ.get("API_TOKEN")
 MONGO_URL = os.environ.get("MONGO_URI")
 ADMIN_ID = int(os.environ.get("ADMIN_ID"))
-
-# तुझे खरे आकडे
 API_ID = 30767171  
 API_HASH = "af363a055e5c68096847d64871c758c5"  
 
-app = Client("broadcast_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+app = Client("multi_broadcast_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 mongo_client = AsyncIOMotorClient(MONGO_URL)
-db = mongo_client.broadcast_db
-channels_col = db.channels
+db = mongo_client.multi_broadcast_db
+
+# दोन वेगळे कप्पे (Collections)
+marathi_col = db.marathi_channels
+hindi_col = db.hindi_channels
 msg_col = db.messages
 
 @app.on_message(filters.private & filters.command("start"))
 async def start(client, message):
-    await message.reply_text("🔥 MTC ब्रॉडकास्ट बॉट तयार आहे!\n\n"
-                             "🔹 /add -100xxx : चॅनेल जोडा\n"
-                             "🔹 /remove -100xxx : चॅनेल काढा\n"
-                             "🔹 /stats : चॅनेल्सची संख्या बघा\n"
-                             "🔹 /delete : शेवटची पोस्ट उडवा")
+    await message.reply_text(
+        "🚀 **MTC Unified Broadcast Bot**\n\n"
+        "🚩 **मराठी विभाग:**\n"
+        "➕ `/add_m` | ➖ `/rm_m` | 📊 `/stats_m` \n"
+        "📢 ब्रॉडकास्टसाठी मेसेज पाठवून `/bm` ने रिप्लाय द्या.\n\n"
+        "🔥 **हिंदी विभाग:**\n"
+        "➕ `/add_h` | ➖ `/rm_h` | 📊 `/stats_h` \n"
+        "📢 ब्रॉडकास्टसाठी मेसेज पाठवून `/bh` ने रिप्लाय द्या.\n\n"
+        "🗑️ **डिलीट:** `/delete_m` किंवा `/delete_h`"
+    )
 
-@app.on_message(filters.private & filters.user(ADMIN_ID) & filters.command("add"))
+# --- चॅनेल मॅनेजमेंट (Add/Remove/Stats) ---
+@app.on_message(filters.private & filters.user(ADMIN_ID) & filters.command(["add_m", "add_h"]))
 async def add_ch(client, message):
-    if len(message.command) < 2: 
-        return await message.reply_text("❌ ID टाका! उदा: /add -100123456789")
+    col = marathi_col if "_m" in message.text else hindi_col
+    if len(message.command) < 2: return await message.reply_text("❌ ID द्या!")
     try:
         c_id = int(message.command[1].strip())
-        await channels_col.update_one({"chat_id": c_id}, {"$set": {"chat_id": c_id}}, upsert=True)
-        await message.reply_text(f"✅ ID {c_id} डेटाबेसमध्ये सेव्ह झाला!")
-    except: 
-        await message.reply_text("❌ चुकीचा ID! फक्त आकडे टाका.")
+        await col.update_one({"chat_id": c_id}, {"$set": {"chat_id": c_id}}, upsert=True)
+        await message.reply_text(f"✅ ID {c_id} सेव्ह झाला!")
+    except: await message.reply_text("❌ चुकीचा ID!")
 
-@app.on_message(filters.private & filters.user(ADMIN_ID) & filters.command("remove"))
+@app.on_message(filters.private & filters.user(ADMIN_ID) & filters.command(["rm_m", "rm_h"]))
 async def rem_ch(client, message):
-    if len(message.command) < 2: return await message.reply_text("❌ ID टाका!")
+    col = marathi_col if "_m" in message.text else hindi_col
     try:
         c_id = int(message.command[1].strip())
-        await channels_col.delete_one({"chat_id": c_id})
-        await message.reply_text(f"🗑️ ID {c_id} काढला आहे.")
+        await col.delete_one({"chat_id": c_id})
+        await message.reply_text(f"🗑️ ID {c_id} काढला!")
     except: pass
 
-@app.on_message(filters.private & filters.command("stats"))
+@app.on_message(filters.private & filters.command(["stats_m", "stats_h"]))
 async def show_stats(client, message):
-    count = await channels_col.count_documents({})
-    await message.reply_text(f"📊 सध्या {count} चॅनेल्स ब्रॉडकास्टसाठी जोडलेले आहेत.")
+    col = marathi_col if "_m" in message.text else hindi_col
+    count = await col.count_documents({})
+    await message.reply_text(f"📊 सध्या {count} चॅनेल्स जोडलेले आहेत.")
 
-@app.on_message(filters.private & filters.user(ADMIN_ID) & ~filters.command(["start", "stats", "delete", "add", "remove"]))
+# --- ब्रॉडकास्ट सिस्टीम (/bm आणि /bh) ---
+@app.on_message(filters.private & filters.user(ADMIN_ID) & filters.command(["bm", "bh"]))
 async def b_cast(client, message):
-    channels = await channels_col.find().to_list(length=100)
-    if not channels: 
-        return await message.reply_text("❌ आधी /add करून चॅनेल जोडा!")
+    if not message.reply_to_message:
+        return await message.reply_text("❌ ज्या पोस्टचा ब्रॉडकास्ट करायचा आहे त्याला रिप्लाय देऊन ही कमांड टाका.")
+    
+    col = marathi_col if message.text == "/bm" else hindi_col
+    reply_msg = message.reply_to_message
+    channels = await col.find().to_list(length=200)
+    
+    if not channels: return await message.reply_text("❌ चॅनेल लिस्ट रिकामी आहे!")
     
     sent_ids = []
     for ch in channels:
         try:
-            sent = await message.copy(ch['chat_id'])
+            sent = await reply_msg.copy(ch['chat_id'])
             sent_ids.append([ch['chat_id'], sent.id])
         except: pass
     
-    await msg_col.update_one({"admin_id": ADMIN_ID}, {"$set": {"sent_ids": sent_ids}}, upsert=True)
-    await message.reply_text(f"✅ {len(sent_ids)} ठिकाणी ब्रॉडकास्ट झाला!")
+    # शेवटचा ब्रॉडकास्ट सेव्ह करा (डिलीट करण्यासाठी)
+    mode = "marathi" if message.text == "/bm" else "hindi"
+    await msg_col.update_one({"type": mode}, {"$set": {"sent_ids": sent_ids}}, upsert=True)
+    await message.reply_text(f"✅ {len(sent_ids)} ठिकाणी ब्रॉडकास्ट पूर्ण!")
 
-@app.on_message(filters.private & filters.command("delete"))
+# --- डिलीट सिस्टीम ---
+@app.on_message(filters.private & filters.user(ADMIN_ID) & filters.command(["delete_m", "delete_h"]))
 async def del_cast(client, message):
-    data = await msg_col.find_one({"admin_id": ADMIN_ID})
+    mode = "marathi" if "_m" in message.text else "hindi"
+    data = await msg_col.find_one({"type": mode})
     if data:
         for c_id, m_id in data["sent_ids"]:
             try: await client.delete_messages(c_id, m_id)
             except: pass
-        await msg_col.delete_one({"admin_id": ADMIN_ID})
-        await message.reply_text("🗑️ सर्व चॅनेल्सवरून पोस्ट डिलीट केली!")
-    else:
-        await message.reply_text("❌ डिलीट करण्यासाठी मेसेज सापडला नाही.")
+        await msg_col.delete_one({"type": mode})
+        await message.reply_text(f"🗑️ {mode} चॅनेल्सवरून पोस्ट डिलीट केली!")
+    else: await message.reply_text("❌ डेटा सापडला नाही.")
 
 async def main():
     await app.start()
-    print("बॉट सुरू झाला आहे... 🚀")
+    print("MTC Multi-Bot Started... 🚀")
     await asyncio.Event().wait()
 
 if __name__ == "__main__":
