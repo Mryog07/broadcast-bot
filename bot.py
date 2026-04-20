@@ -20,7 +20,7 @@ def run_dummy_server():
 threading.Thread(target=run_dummy_server, daemon=True).start()
 # ----------------------------------------------
 
-# रेंडरवरील Variables (काहीही बदलू नकोस, रेंडरवरून आपोआप उचलले जातील)
+# रेंडरवरील Variables (काहीही बदलू नकोस)
 BOT_TOKEN = os.environ.get("API_TOKEN")
 MONGO_URL = os.environ.get("MONGO_URI")
 ADMIN_ID = int(os.environ.get("ADMIN_ID"))
@@ -43,41 +43,49 @@ async def start(client, message):
     await message.reply_text(
         "🚀 **MTC Unified Control Panel**\n\n"
         "🚩 **मराठी विभाग:**\n"
-        "➕ `/add_m` | ➖ `/rm_m` | 📊 `/stats_m` \n"
-        "📢 ब्रॉडकास्ट: पोस्टला `/bm` ने रिप्लाय द्या.\n\n"
+        "➕ `/add_marathi` | ➖ `/remove_marathi` | 📊 `/stats_marathi` \n"
+        "📢 ब्रॉडकास्ट: पोस्टला `/broadcast_marathi` ने रिप्लाय द्या.\n\n"
         "🔥 **हिंदी विभाग:**\n"
-        "➕ `/add_h` | ➖ `/rm_h` | 📊 `/stats_h` \n"
-        "📢 ब्रॉडकास्ट: पोस्टला `/bh` ने रिप्लाय द्या.\n\n"
-        "🗑️ **डिलीट:** `/del_m` किंवा `/del_h` (शेवटची पोस्ट उडवण्यासाठी)"
+        "➕ `/add_hindi` | ➖ `/remove_hindi` | 📊 `/stats_hindi` \n"
+        "📢 ब्रॉडकास्ट: पोस्टला `/broadcast_hindi` ने रिप्लाय द्या.\n\n"
+        "🗑️ **डिलीट:** `/delete_marathi` किंवा `/delete_hindi` (शेवटची पोस्ट उडवण्यासाठी)"
     )
 
 # --- चॅनेल मॅनेजमेंट ---
-@app.on_message(filters.private & filters.user(ADMIN_ID) & filters.command(["add_m", "add_h"]))
+@app.on_message(filters.private & filters.user(ADMIN_ID) & filters.command(["add_marathi", "add_hindi"]))
 async def add_ch(client, message):
-    col = marathi_col if "_m" in message.text else hindi_col
-    if len(message.command) < 2: return await message.reply_text("❌ ID द्या!")
+    col = marathi_col if "marathi" in message.text else hindi_col
+    if len(message.command) < 2: return await message.reply_text("❌ ID द्या! उदा: /add_marathi -100xxx")
     try:
         c_id = int(message.command[1].strip())
         await col.update_one({"chat_id": c_id}, {"$set": {"chat_id": c_id}}, upsert=True)
         await message.reply_text(f"✅ चॅनेल {c_id} सेव्ह झाला!")
     except: await message.reply_text("❌ आयडी फक्त आकड्यांत द्या!")
 
-@app.on_message(filters.private & filters.user(ADMIN_ID) & filters.command(["rm_m", "rm_h"]))
+@app.on_message(filters.private & filters.user(ADMIN_ID) & filters.command(["remove_marathi", "remove_hindi"]))
 async def rem_ch(client, message):
-    col = marathi_col if "_m" in message.text else hindi_col
+    col = marathi_col if "marathi" in message.text else hindi_col
+    if len(message.command) < 2: return await message.reply_text("❌ ID द्या! उदा: /remove_marathi -100xxx")
     try:
         c_id = int(message.command[1].strip())
         await col.delete_one({"chat_id": c_id})
         await message.reply_text(f"🗑️ चॅनेल {c_id} काढला!")
     except: pass
 
+@app.on_message(filters.private & filters.user(ADMIN_ID) & filters.command(["stats_marathi", "stats_hindi"]))
+async def show_stats(client, message):
+    col = marathi_col if "marathi" in message.text else hindi_col
+    lang = "मराठी" if "marathi" in message.text else "हिंदी"
+    count = await col.count_documents({})
+    await message.reply_text(f"📊 सध्या {count} {lang} चॅनेल्स जोडलेले आहेत.")
+
 # --- ब्रॉडकास्ट सिस्टीम ---
-@app.on_message(filters.private & filters.user(ADMIN_ID) & filters.command(["bm", "bh"]))
+@app.on_message(filters.private & filters.user(ADMIN_ID) & filters.command(["broadcast_marathi", "broadcast_hindi"]))
 async def b_cast(client, message):
     if not message.reply_to_message:
         return await message.reply_text("❌ ज्या मेसेजचा ब्रॉडकास्ट करायचा आहे, त्याला रिप्लाय देऊन ही कमांड टाका!")
     
-    col = marathi_col if message.text == "/bm" else hindi_col
+    col = marathi_col if "marathi" in message.text else hindi_col
     reply_msg = message.reply_to_message
     channels = await col.find().to_list(length=300)
     
@@ -90,14 +98,14 @@ async def b_cast(client, message):
             sent_ids.append([ch['chat_id'], sent.id])
         except: pass
     
-    mode = "marathi" if message.text == "/bm" else "hindi"
+    mode = "marathi" if "marathi" in message.text else "hindi"
     await msg_col.update_one({"type": mode}, {"$set": {"sent_ids": sent_ids}}, upsert=True)
     await message.reply_text(f"✅ {len(sent_ids)} चॅनेल्सवर ब्रॉडकास्ट पूर्ण!")
 
 # --- डिलीट सिस्टीम ---
-@app.on_message(filters.private & filters.user(ADMIN_ID) & filters.command(["del_m", "del_h"]))
+@app.on_message(filters.private & filters.user(ADMIN_ID) & filters.command(["delete_marathi", "delete_hindi"]))
 async def del_cast(client, message):
-    mode = "marathi" if "_m" in message.text else "hindi"
+    mode = "marathi" if "marathi" in message.text else "hindi"
     data = await msg_col.find_one({"type": mode})
     if data:
         for c_id, m_id in data["sent_ids"]:
