@@ -38,9 +38,8 @@ marathi_col = db.marathi_channels
 hindi_col = db.hindi_channels
 msg_col = db.messages
 
-# शेड्युलिंग सिस्टीम सुरू करणे
+# शेड्युलर सेटअप
 scheduler = AsyncIOScheduler()
-scheduler.start()
 
 async def scheduled_broadcast(chat_ids, reply_to_message, mode):
     sent_ids = []
@@ -57,12 +56,10 @@ async def start(client, message):
         "🚀 **MTC Unified Control Panel**\n\n"
         "🚩 **मराठी विभाग:**\n"
         "➕ `/add_marathi` | ➖ `/remove_marathi` | 📊 `/stats_marathi` \n"
-        "📢 ब्रॉडकास्ट: पोस्टला `/broadcast_marathi` ने रिप्लाय द्या.\n"
-        "⏰ शेड्युल: `/schedule_marathi 10:00 AM`\n\n"
+        "📢 ब्रॉडकास्ट: `/broadcast_marathi` | ⏰ शेड्युल: `/schedule_marathi 10:00 AM`\n\n"
         "🔥 **हिंदी विभाग:**\n"
         "➕ `/add_hindi` | ➖ `/remove_hindi` | 📊 `/stats_hindi` \n"
-        "📢 ब्रॉडकास्ट: पोस्टला `/broadcast_hindi` ने रिप्लाय द्या.\n"
-        "⏰ शेड्युल: `/schedule_hindi 10:00 AM`\n\n"
+        "📢 ब्रॉडकास्ट: `/broadcast_hindi` | ⏰ शेड्युल: `/schedule_hindi 10:00 AM`\n\n"
         "🗑️ **डिलीट:** `/delete_marathi` किंवा `/delete_hindi`"
     )
 
@@ -98,7 +95,7 @@ async def show_stats(client, message):
 @app.on_message(filters.private & filters.user(ADMIN_ID) & filters.command(["broadcast_marathi", "broadcast_hindi"]))
 async def b_cast(client, message):
     if not message.reply_to_message:
-        return await message.reply_text("❌ ज्या मेसेजचा ब्रॉडकास्ट करायचा आहे, त्याला रिप्लाय देऊन ही कमांड टाका!")
+        return await message.reply_text("❌ पोस्टला रिप्लाय देऊन कमांड टाका!")
     col = marathi_col if "marathi" in message.text else hindi_col
     reply_msg = message.reply_to_message
     channels = await col.find().to_list(length=300)
@@ -144,6 +141,7 @@ async def del_cast(client, message):
     else: await message.reply_text("❌ डिलीट करण्यासाठी डेटा नाही.")
 
 async def main():
+    scheduler.start()
     await app.start()
     print("MTC Unified Bot Started! 🚀")
     await asyncio.Event().wait()
