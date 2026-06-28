@@ -55,11 +55,13 @@ async def start(client, message):
     await message.reply_text(
         "🚀 **MTC Unified Control Panel**\n\n"
         "🚩 **मराठी विभाग:**\n"
-        "➕ `/add_marathi` | ➖ `/remove_marathi` | 📊 `/stats_marathi` \n"
-        "📢 ब्रॉडकास्ट: `/broadcast_marathi` | ⏰ शेड्युल: `/schedule_marathi 10:00 AM`\n\n"
+        "➕ `/add_marathi` | ➖ `/remove_marathi` | 📊 `/stats_marathi`\n"
+        "📢 ब्रॉडकास्ट: `/broadcast_marathi` (रिप्लाय द्या)\n"
+        "⏰ शेड्युल: `/schedule_marathi 10:00 AM` (रिप्लाय द्या)\n\n"
         "🔥 **हिंदी विभाग:**\n"
-        "➕ `/add_hindi` | ➖ `/remove_hindi` | 📊 `/stats_hindi` \n"
-        "📢 ब्रॉडकास्ट: `/broadcast_hindi` | ⏰ शेड्युल: `/schedule_hindi 10:00 AM`\n\n"
+        "➕ `/add_hindi` | ➖ `/remove_hindi` | 📊 `/stats_hindi`\n"
+        "📢 ब्रॉडकास्ट: `/broadcast_hindi` (रिप्लाय द्या)\n"
+        "⏰ शेड्युल: `/schedule_hindi 10:00 AM` (रिप्लाय द्या)\n\n"
         "🗑️ **डिलीट:** `/delete_marathi` किंवा `/delete_hindi`"
     )
 
