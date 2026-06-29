@@ -7,7 +7,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from datetime import datetime, timedelta
 
-# --- रेंडरला जिवंत ठेवण्यासाठी Dummy Web Server ---
+# --- रेंडरला जिवंत ठेवण्यासाठी वेब सर्व्हर ---
 class DummyHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -20,8 +20,8 @@ def run_dummy_server():
     server.serve_forever()
 
 threading.Thread(target=run_dummy_server, daemon=True).start()
-# ----------------------------------------------
 
+# --- कॉन्फिग ---
 BOT_TOKEN = os.environ.get("API_TOKEN")
 MONGO_URL = os.environ.get("MONGO_URI")
 ADMIN_ID = int(os.environ.get("ADMIN_ID"))
@@ -31,7 +31,6 @@ API_HASH = "af363a055e5c68096847d64871c758c5"
 app = Client("mtc_unified_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 mongo_client = AsyncIOMotorClient(MONGO_URL)
 db = mongo_client.mtc_unified_db
-
 marathi_col = db.marathi_channels
 hindi_col = db.hindi_channels
 msg_col = db.messages
@@ -41,24 +40,22 @@ scheduler = AsyncIOScheduler()
 # --- सुधारीत मेमरी-फ्रेंडली ब्रॉडकास्ट फंक्शन ---
 async def scheduled_broadcast(chat_ids, reply_to_message, mode):
     sent_ids = []
-    sent_count = 0 
+    sent_count = 0
     for c_id in chat_ids:
         try:
             sent = await reply_to_message.copy(c_id)
             sent_ids.append([c_id, sent.id])
             sent_count += 1
             await asyncio.sleep(2) # मेमरी वाचवण्यासाठी गॅप
-        except: pass
+        except: continue
     
     await msg_col.update_one({"type": mode}, {"$set": {"sent_ids": sent_ids}}, upsert=True)
-    # शेड्युल ब्रॉडकास्ट पूर्ण झाल्यावर मेसेज पाठवणे (आडमिनला अपडेट)
-    try:
-        await reply_to_message.reply(f"✅ {sent_count} चॅनेल्सवर शेड्युल ब्रॉडकास्ट पूर्ण!")
+    try: await reply_to_message.reply(f"✅ {sent_count} चॅनेल्सवर शेड्युल ब्रॉडकास्ट पूर्ण!")
     except: pass
 
 @app.on_message(filters.private & filters.command("start"))
 async def start(client, message):
-    await message.reply_text("🚀 **MTC Unified Control Panel** सुरु आहे!")
+    await message.reply_text("🚀 **MTC Unified Control Panel सुरु आहे!**")
 
 @app.on_message(filters.private & filters.user(ADMIN_ID) & filters.command(["add_marathi", "add_hindi"]))
 async def add_ch(client, message):
@@ -79,6 +76,13 @@ async def rem_ch(client, message):
         await message.reply_text(f"🗑️ चॅनेल {c_id} काढला!")
     except: pass
 
+@app.on_message(filters.private & filters.user(ADMIN_ID) & filters.command(["stats_marathi", "stats_hindi"]))
+async def show_stats(client, message):
+    col = marathi_col if "marathi" in message.text else hindi_col
+    lang = "मराठी" if "marathi" in message.text else "हिंदी"
+    count = await col.count_documents({})
+    await message.reply_text(f"📊 सध्या {count} {lang} चॅनेल्स जोडलेले आहेत.")
+
 @app.on_message(filters.private & filters.user(ADMIN_ID) & filters.command(["broadcast_marathi", "broadcast_hindi"]))
 async def b_cast(client, message):
     if not message.reply_to_message: return await message.reply_text("❌ रिप्लाय द्या!")
@@ -91,8 +95,8 @@ async def b_cast(client, message):
             sent = await message.reply_to_message.copy(ch['chat_id'])
             sent_ids.append([ch['chat_id'], sent.id])
             sent_count += 1
-            await asyncio.sleep(2) # मेमरी वाचवण्यासाठी गॅप
-        except: pass
+            await asyncio.sleep(2)
+        except: continue
     mode = "marathi" if "marathi" in message.text else "hindi"
     await msg_col.update_one({"type": mode}, {"$set": {"sent_ids": sent_ids}}, upsert=True)
     await message.reply_text(f"✅ {sent_count} चॅनेल्सवर ब्रॉडकास्ट पूर्ण!")
