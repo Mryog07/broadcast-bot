@@ -5,7 +5,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pyrogram import Client, filters
 from motor.motor_asyncio import AsyncIOMotorClient
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # --- रेंडरला जिवंत ठेवण्यासाठी Dummy Web Server ---
 class DummyHandler(BaseHTTPRequestHandler):
@@ -65,7 +65,6 @@ async def start(client, message):
         "🗑️ **डिलीट:** `/delete_marathi` किंवा `/delete_hindi`"
     )
 
-# --- चॅनेल मॅनेजमेंट ---
 @app.on_message(filters.private & filters.user(ADMIN_ID) & filters.command(["add_marathi", "add_hindi"]))
 async def add_ch(client, message):
     col = marathi_col if "marathi" in message.text else hindi_col
@@ -93,7 +92,6 @@ async def show_stats(client, message):
     count = await col.count_documents({})
     await message.reply_text(f"📊 सध्या {count} {lang} चॅनेल्स जोडलेले आहेत.")
 
-# --- ब्रॉडकास्ट सिस्टीम ---
 @app.on_message(filters.private & filters.user(ADMIN_ID) & filters.command(["broadcast_marathi", "broadcast_hindi"]))
 async def b_cast(client, message):
     if not message.reply_to_message:
@@ -112,7 +110,6 @@ async def b_cast(client, message):
     await msg_col.update_one({"type": mode}, {"$set": {"sent_ids": sent_ids}}, upsert=True)
     await message.reply_text(f"✅ {len(sent_ids)} चॅनेल्सवर ब्रॉडकास्ट पूर्ण!")
 
-# --- शेड्युलिंग सिस्टीम ---
 @app.on_message(filters.private & filters.user(ADMIN_ID) & filters.command(["schedule_marathi", "schedule_hindi"]))
 async def schedule_cmd(client, message):
     if not message.reply_to_message or len(message.command) < 3:
@@ -121,15 +118,17 @@ async def schedule_cmd(client, message):
     mode = "marathi" if "marathi" in message.text else "hindi"
     col = marathi_col if mode == "marathi" else hindi_col
     try:
-        scheduled_time = datetime.strptime(f"{datetime.now().date()} {time_str}", "%Y-%m-%d %I:%M %p")
+        # UTC ते IST कन्व्हर्जन फिक्स
+        target_time = datetime.strptime(f"{datetime.now().date()} {time_str}", "%Y-%m-%d %I:%M %p")
+        run_date = target_time - timedelta(hours=5, minutes=30)
+        
         channels = await col.find().to_list(length=300)
         chat_ids = [ch['chat_id'] for ch in channels]
-        scheduler.add_job(scheduled_broadcast, 'date', run_date=scheduled_time, args=[chat_ids, message.reply_to_message, mode])
+        scheduler.add_job(scheduled_broadcast, 'date', run_date=run_date, args=[chat_ids, message.reply_to_message, mode])
         await message.reply_text(f"✅ पोस्ट {time_str} ला शेड्युल झाली आहे!")
     except Exception as e:
         await message.reply_text(f"❌ वेळ नीट द्या (उदा: 10:05 AM). Error: {e}")
 
-# --- डिलीट सिस्टीम ---
 @app.on_message(filters.private & filters.user(ADMIN_ID) & filters.command(["delete_marathi", "delete_hindi"]))
 async def del_cast(client, message):
     mode = "marathi" if "marathi" in message.text else "hindi"
