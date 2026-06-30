@@ -7,12 +7,17 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from datetime import datetime, timedelta
 
-# --- रेंडरला जिवंत ठेवण्यासाठी वेब सर्व्हर ---
+# --- रेंडरला जिवंत ठेवण्यासाठी वेब सर्व्हर (सुधारित) ---
 class DummyHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.end_headers()
         self.wfile.write(b"MTC Unified Bot is Running!")
+        
+    # GitHub Action च्या पिंगसाठी HEAD रिक्वेस्ट सपोर्ट
+    def do_HEAD(self):
+        self.send_response(200)
+        self.end_headers()
 
 def run_dummy_server():
     port = int(os.environ.get("PORT", 10000))
@@ -37,17 +42,23 @@ msg_col = db.messages
 
 scheduler = AsyncIOScheduler()
 
-# --- सुधारीत मेमरी-फ्रेंडली ब्रॉडकास्ट फंक्शन ---
+# --- सुधारीत मेमरी-फ्रेंडली ब्रॉडकास्ट फंक्शन (Batching) ---
 async def scheduled_broadcast(chat_ids, reply_to_message, mode):
     sent_ids = []
     sent_count = 0
-    for c_id in chat_ids:
-        try:
-            sent = await reply_to_message.copy(c_id)
-            sent_ids.append([c_id, sent.id])
-            sent_count += 1
-            await asyncio.sleep(2) # मेमरी वाचवण्यासाठी गॅप
-        except: continue
+    
+    # २-२ चॅनेल्सच्या बॅचेसमध्ये काम करणे
+    for i in range(0, len(chat_ids), 2):
+        batch = chat_ids[i:i+2]
+        for c_id in batch:
+            try:
+                sent = await reply_to_message.copy(c_id)
+                sent_ids.append([c_id, sent.id])
+                sent_count += 1
+            except: 
+                continue
+        # प्रत्येक बॅचनंतर ५ सेकंद विश्रांती (मेमरीसाठी अत्यंत महत्त्वाचे)
+        await asyncio.sleep(5)
     
     await msg_col.update_one({"type": mode}, {"$set": {"sent_ids": sent_ids}}, upsert=True)
     try: await reply_to_message.reply(f"✅ {sent_count} चॅनेल्सवर शेड्युल ब्रॉडकास्ट पूर्ण!")
@@ -88,15 +99,23 @@ async def b_cast(client, message):
     if not message.reply_to_message: return await message.reply_text("❌ रिप्लाय द्या!")
     col = marathi_col if "marathi" in message.text else hindi_col
     channels = await col.find().to_list(length=300)
+    
+    chat_ids = [ch['chat_id'] for ch in channels]
     sent_ids = []
     sent_count = 0
-    for ch in channels:
-        try:
-            sent = await message.reply_to_message.copy(ch['chat_id'])
-            sent_ids.append([ch['chat_id'], sent.id])
-            sent_count += 1
-            await asyncio.sleep(2)
-        except: continue
+    
+    # मॅन्युअल ब्रॉडकास्टमध्येही बॅचिंग लावले आहे
+    for i in range(0, len(chat_ids), 2):
+        batch = chat_ids[i:i+2]
+        for c_id in batch:
+            try:
+                sent = await message.reply_to_message.copy(c_id)
+                sent_ids.append([c_id, sent.id])
+                sent_count += 1
+            except: 
+                continue
+        await asyncio.sleep(5)
+        
     mode = "marathi" if "marathi" in message.text else "hindi"
     await msg_col.update_one({"type": mode}, {"$set": {"sent_ids": sent_ids}}, upsert=True)
     await message.reply_text(f"✅ {sent_count} चॅनेल्सवर ब्रॉडकास्ट पूर्ण!")
