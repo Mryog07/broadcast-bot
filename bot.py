@@ -7,13 +7,12 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from datetime import datetime, timedelta
 
-# --- रेंडरला जिवंत ठेवण्यासाठी वेब सर्व्हर (सुधारित) ---
+# --- वेब सर्व्हर (रेंडरसाठी) ---
 class DummyHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.end_headers()
         self.wfile.write(b"MTC Unified Bot is Running!")
-        
     def do_HEAD(self):
         self.send_response(200)
         self.end_headers()
@@ -38,49 +37,43 @@ db = mongo_client.mtc_unified_db
 marathi_col = db.marathi_channels
 hindi_col = db.hindi_channels
 msg_col = db.messages
-session_col = db.bot_session # नवीन: मेमरी बॅकअपसाठी
 
 scheduler = AsyncIOScheduler()
 
-# --- मेमरी बॅकअप लॉजिक (नवीन) ---
-async def backup_session():
-    try:
-        if os.path.exists("mtc_unified_bot.session"):
-            with open("mtc_unified_bot.session", "rb") as f:
-                await session_col.update_one({"name": "session"}, {"$set": {"data": f.read()}}, upsert=True)
-    except: pass
-
-async def restore_session():
-    try:
-        data = await session_col.find_one({"name": "session"})
-        if data:
-            with open("mtc_unified_bot.session", "wb") as f:
-                f.write(data["data"])
-    except: pass
-
-# --- सुधारीत मेमरी-फ्रेंडली ब्रॉडकास्ट फंक्शन (Batching) ---
-async def scheduled_broadcast(chat_ids, reply_to_message, mode):
+# --- ब्रॉडकास्ट फंक्शन (फिक्स केलेले) ---
+@app.on_message(filters.private & filters.user(ADMIN_ID) & filters.command(["broadcast_marathi", "broadcast_hindi"]))
+async def b_cast(client, message):
+    if not message.reply_to_message: return await message.reply_text("❌ रिप्लाय द्या!")
+    
+    col = marathi_col if "marathi" in message.text else hindi_col
+    # प्रत्येक वेळी डेटाबेसवरून ताजी लिस्ट घेणे
+    channels = await col.find({}).to_list(length=300)
+    
+    chat_ids = [ch['chat_id'] for ch in channels]
     sent_ids = []
     sent_count = 0
     
+    # बॅचिंग करून पोस्ट करणे
     for i in range(0, len(chat_ids), 2):
         batch = chat_ids[i:i+2]
         for c_id in batch:
             try:
-                sent = await reply_to_message.copy(c_id)
+                sent = await message.reply_to_message.copy(c_id)
                 sent_ids.append([c_id, sent.id])
                 sent_count += 1
-            except: 
+            except Exception as e:
+                print(f"Error: {e}")
                 continue
         await asyncio.sleep(5)
-    
+        
+    mode = "marathi" if "marathi" in message.text else "hindi"
     await msg_col.update_one({"type": mode}, {"$set": {"sent_ids": sent_ids}}, upsert=True)
-    try: await reply_to_message.reply(f"✅ {sent_count} चॅनेल्सवर शेड्युल ब्रॉडकास्ट पूर्ण!")
-    except: pass
+    await message.reply_text(f"✅ डेटाबेस तपासला! {sent_count} चॅनेल्सवर ब्रॉडकास्ट पूर्ण!")
 
+# --- इतर कमांड्स ---
 @app.on_message(filters.private & filters.command("start"))
 async def start(client, message):
-    await message.reply_text("🚀 **MTC Unified Control Panel सुरु आहे!**")
+    await message.reply_text("🚀 **MTC Unified Bot सुरु आहे!**")
 
 @app.on_message(filters.private & filters.user(ADMIN_ID) & filters.command(["add_marathi", "add_hindi"]))
 async def add_ch(client, message):
@@ -90,112 +83,30 @@ async def add_ch(client, message):
         c_id = int(message.command[1].strip())
         await col.update_one({"chat_id": c_id}, {"$set": {"chat_id": c_id}}, upsert=True)
         await message.reply_text(f"✅ चॅनेल {c_id} सेव्ह झाला!")
-    except: await message.reply_text("❌ आयडी फक्त आकड्यांत द्या!")
-
-@app.on_message(filters.private & filters.user(ADMIN_ID) & filters.command(["remove_marathi", "remove_hindi"]))
-async def rem_ch(client, message):
-    col = marathi_col if "marathi" in message.text else hindi_col
-    try:
-        c_id = int(message.command[1].strip())
-        await col.delete_one({"chat_id": c_id})
-        await message.reply_text(f"🗑️ चॅनेल {c_id} काढला!")
-    except: pass
-
-@app.on_message(filters.private & filters.user(ADMIN_ID) & filters.command(["stats_marathi", "stats_hindi"]))
-async def show_stats(client, message):
-    col = marathi_col if "marathi" in message.text else hindi_col
-    lang = "मराठी" if "marathi" in message.text else "हिंदी"
-    count = await col.count_documents({})
-    await message.reply_text(f"📊 सध्या {count} {lang} चॅनेल्स जोडलेले आहेत.")
-
-@app.on_message(filters.private & filters.user(ADMIN_ID) & filters.command(["broadcast_marathi", "broadcast_hindi"]))
-async def b_cast(client, message):
-    if not message.reply_to_message: return await message.reply_text("❌ रिप्लाय द्या!")
-    col = marathi_col if "marathi" in message.text else hindi_col
-    channels = await col.find().to_list(length=300)
-    
-    chat_ids = [ch['chat_id'] for ch in channels]
-    sent_ids = []
-    sent_count = 0
-    
-    for i in range(0, len(chat_ids), 2):
-        batch = chat_ids[i:i+2]
-        for c_id in batch:
-            try:
-                sent = await message.reply_to_message.copy(c_id)
-                sent_ids.append([c_id, sent.id])
-                sent_count += 1
-            except: 
-                continue
-        await asyncio.sleep(5)
-        
-    mode = "marathi" if "marathi" in message.text else "hindi"
-    await msg_col.update_one({"type": mode}, {"$set": {"sent_ids": sent_ids}}, upsert=True)
-    await message.reply_text(f"✅ {sent_count} चॅनेल्सवर ब्रॉडकास्ट पूर्ण!")
-
-@app.on_message(filters.private & filters.user(ADMIN_ID) & filters.command(["schedule_marathi", "schedule_hindi"]))
-async def schedule_cmd(client, message):
-    if not message.reply_to_message or len(message.command) < 3: return await message.reply_text("❌ पद्धत: /schedule_marathi 10:05 AM")
-    mode = "marathi" if "marathi" in message.text else "hindi"
-    col = marathi_col if mode == "marathi" else hindi_col
-    try:
-        target_time = datetime.strptime(f"{datetime.now().date()} {message.command[1]} {message.command[2]}", "%Y-%m-%d %I:%M %p")
-        run_date = target_time - timedelta(hours=5, minutes=30)
-        channels = await col.find().to_list(length=300)
-        chat_ids = [ch['chat_id'] for ch in channels]
-        scheduler.add_job(scheduled_broadcast, 'date', run_date=run_date, args=[chat_ids, message.reply_to_message, mode])
-        await message.reply_text(f"✅ पोस्ट {message.command[1]} {message.command[2]} ला शेड्युल झाली!")
-    except Exception as e: await message.reply_text(f"❌ वेळ नीट द्या. Error: {e}")
+    except: await message.reply_text("❌ आयडी आकड्यांत द्या!")
 
 @app.on_message(filters.private & filters.user(ADMIN_ID) & filters.command(["delete_marathi", "delete_hindi"]))
 async def del_cast(client, message):
     mode = "marathi" if "marathi" in message.text else "hindi"
     data = await msg_col.find_one({"type": mode})
-    
     if data and "sent_ids" in data:
         for c_id, m_id in data["sent_ids"]:
-            try: 
-                await client.delete_messages(c_id, m_id)
-            except: 
-                pass
+            try: await client.delete_messages(c_id, m_id)
+            except: pass
         await msg_col.delete_one({"type": mode})
-        await message.reply_text(f"🗑️ {mode} चॅनेल्सवरून शेवटची पोस्ट डिलीट केली!")
-    else: 
-        await message.reply_text("❌ डेटा नाही.")
+        await message.reply_text(f"🗑️ पोस्ट डिलीट केली!")
+    else: await message.reply_text("❌ डेटा नाही.")
 
-@app.on_message(filters.private & filters.user(ADMIN_ID) & filters.command("test_error"))
-async def test_err(client, message):
-    if not message.reply_to_message: return await message.reply_text("❌ एखाद्या मेसेजला रिप्लाय देऊन ही कमांड द्या!")
-    
-    channels = await marathi_col.find().to_list(length=300)
-    report = "📊 **टेस्ट रिपोर्ट:**\n\n"
-    
-    for ch in channels:
-        c_id = ch['chat_id']
-        try:
-            chat_info = await client.get_chat(c_id)
-            ch_name = chat_info.title
-        except:
-            ch_name = "नाव सापडत नाही"
-            
-        try:
-            await message.reply_to_message.copy(c_id)
-            report += f"✅ **{ch_name}** (`{c_id}`) : यशस्वी\n"
-        except Exception as e:
-            report += f"❌ **{ch_name}** (`{c_id}`) : एरर - `{e}`\n"
-        await asyncio.sleep(1)
-        
-    await message.reply_text(report)
+@app.on_message(filters.private & filters.user(ADMIN_ID) & filters.command(["stats_marathi", "stats_hindi"]))
+async def show_stats(client, message):
+    col = marathi_col if "marathi" in message.text else hindi_col
+    count = await col.count_documents({})
+    await message.reply_text(f"📊 {count} चॅनेल्स जोडलेले आहेत.")
 
 async def main():
-    await restore_session() # बॉट सुरू झाल्यावर जुनी मेमरी परत घेणे
-    scheduler.add_job(backup_session, 'interval', hours=1) # दर १ तासाने आपोआप बॅकअप
     scheduler.start()
-    
     await app.start()
-    await backup_session() # सुरुवातीला एकदा बॅकअप घेणे
-    print("MTC Unified Bot Started with Auto-Backup! 🚀")
-    
+    print("MTC Unified Bot Ready! 🚀")
     await asyncio.Event().wait()
 
 if __name__ == "__main__":
