@@ -145,6 +145,7 @@ async def del_cast(client, message):
         await msg_col.delete_one({"type": mode})
         await message.reply_text(f"🗑️ {mode} चॅनेलची पोस्ट डिलीट केली!")
     else: await message.reply_text("❌ डेटा नाही.")
+
 @app.on_message(filters.private & filters.user(ADMIN_ID) & filters.command("test_error"))
 async def test_err(client, message):
     if not message.reply_to_message: return await message.reply_text("❌ एखाद्या मेसेजला रिप्लाय देऊन ही कमांड द्या!")
@@ -154,11 +155,20 @@ async def test_err(client, message):
     
     for ch in channels:
         c_id = ch['chat_id']
+        
+        # चॅनेलचे नाव शोधण्याचा प्रयत्न
+        try:
+            chat_info = await client.get_chat(c_id)
+            ch_name = chat_info.title
+        except:
+            ch_name = "नाव सापडत नाही"
+            
+        # मेसेज पाठवण्याचा प्रयत्न
         try:
             await message.reply_to_message.copy(c_id)
-            report += f"✅ `{c_id}` : यशस्वी\n"
+            report += f"✅ **{ch_name}** (`{c_id}`) : यशस्वी\n"
         except Exception as e:
-            report += f"❌ `{c_id}` : एरर - `{e}`\n"
+            report += f"❌ **{ch_name}** (`{c_id}`) : एरर - `{e}`\n"
         await asyncio.sleep(1)
         
     await message.reply_text(report)
