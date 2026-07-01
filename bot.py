@@ -138,13 +138,17 @@ async def schedule_cmd(client, message):
 async def del_cast(client, message):
     mode = "marathi" if "marathi" in message.text else "hindi"
     data = await msg_col.find_one({"type": mode})
-    if data:
+    
+    if data and "sent_ids" in data:
         for c_id, m_id in data["sent_ids"]:
-            try: await client.delete_messages(c_id, m_id)
-            except: pass
+            try: 
+                await client.delete_messages(c_id, m_id)
+            except: 
+                pass
         await msg_col.delete_one({"type": mode})
-        await message.reply_text(f"🗑️ {mode} चॅनेलची पोस्ट डिलीट केली!")
-    else: await message.reply_text("❌ डेटा नाही.")
+        await message.reply_text(f"🗑️ {mode} चॅनेल्सवरून शेवटची पोस्ट डिलीट केली!")
+    else: 
+        await message.reply_text("❌ डेटा नाही.")
 
 @app.on_message(filters.private & filters.user(ADMIN_ID) & filters.command("test_error"))
 async def test_err(client, message):
