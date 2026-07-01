@@ -14,7 +14,6 @@ class DummyHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(b"MTC Unified Bot is Running!")
         
-    # GitHub Action च्या पिंगसाठी HEAD रिक्वेस्ट सपोर्ट
     def do_HEAD(self):
         self.send_response(200)
         self.end_headers()
@@ -39,15 +38,31 @@ db = mongo_client.mtc_unified_db
 marathi_col = db.marathi_channels
 hindi_col = db.hindi_channels
 msg_col = db.messages
+session_col = db.bot_session # नवीन: मेमरी बॅकअपसाठी
 
 scheduler = AsyncIOScheduler()
+
+# --- मेमरी बॅकअप लॉजिक (नवीन) ---
+async def backup_session():
+    try:
+        if os.path.exists("mtc_unified_bot.session"):
+            with open("mtc_unified_bot.session", "rb") as f:
+                await session_col.update_one({"name": "session"}, {"$set": {"data": f.read()}}, upsert=True)
+    except: pass
+
+async def restore_session():
+    try:
+        data = await session_col.find_one({"name": "session"})
+        if data:
+            with open("mtc_unified_bot.session", "wb") as f:
+                f.write(data["data"])
+    except: pass
 
 # --- सुधारीत मेमरी-फ्रेंडली ब्रॉडकास्ट फंक्शन (Batching) ---
 async def scheduled_broadcast(chat_ids, reply_to_message, mode):
     sent_ids = []
     sent_count = 0
     
-    # २-२ चॅनेल्सच्या बॅचेसमध्ये काम करणे
     for i in range(0, len(chat_ids), 2):
         batch = chat_ids[i:i+2]
         for c_id in batch:
@@ -57,7 +72,6 @@ async def scheduled_broadcast(chat_ids, reply_to_message, mode):
                 sent_count += 1
             except: 
                 continue
-        # प्रत्येक बॅचनंतर ५ सेकंद विश्रांती (मेमरीसाठी अत्यंत महत्त्वाचे)
         await asyncio.sleep(5)
     
     await msg_col.update_one({"type": mode}, {"$set": {"sent_ids": sent_ids}}, upsert=True)
@@ -104,7 +118,6 @@ async def b_cast(client, message):
     sent_ids = []
     sent_count = 0
     
-    # मॅन्युअल ब्रॉडकास्टमध्येही बॅचिंग लावले आहे
     for i in range(0, len(chat_ids), 2):
         batch = chat_ids[i:i+2]
         for c_id in batch:
@@ -159,15 +172,12 @@ async def test_err(client, message):
     
     for ch in channels:
         c_id = ch['chat_id']
-        
-        # चॅनेलचे नाव शोधण्याचा प्रयत्न
         try:
             chat_info = await client.get_chat(c_id)
             ch_name = chat_info.title
         except:
             ch_name = "नाव सापडत नाही"
             
-        # मेसेज पाठवण्याचा प्रयत्न
         try:
             await message.reply_to_message.copy(c_id)
             report += f"✅ **{ch_name}** (`{c_id}`) : यशस्वी\n"
@@ -178,9 +188,14 @@ async def test_err(client, message):
     await message.reply_text(report)
 
 async def main():
+    await restore_session() # बॉट सुरू झाल्यावर जुनी मेमरी परत घेणे
+    scheduler.add_job(backup_session, 'interval', hours=1) # दर १ तासाने आपोआप बॅकअप
     scheduler.start()
+    
     await app.start()
-    print("MTC Unified Bot Started! 🚀")
+    await backup_session() # सुरुवातीला एकदा बॅकअप घेणे
+    print("MTC Unified Bot Started with Auto-Backup! 🚀")
+    
     await asyncio.Event().wait()
 
 if __name__ == "__main__":
