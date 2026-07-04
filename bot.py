@@ -4,9 +4,8 @@ import threading
 from flask import Flask
 from pyrogram import Client, filters
 from motor.motor_asyncio import AsyncIOMotorClient
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-# --- वेब सर्व्हर (Keep Alive - मजबूत Flask सर्व्हर) ---
+# --- Flask वेब सर्व्हर (Keep Alive) ---
 web_app = Flask(__name__)
 
 @web_app.route('/')
@@ -14,13 +13,18 @@ def keep_alive():
     return "Bot is alive!", 200
 
 def run_web():
-    # Render चा पोर्ट वापरून सर्व्हर रन करणे
+    # Render ने दिलेल्या पोर्टवर सर्व्हर चालू करा
     web_app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
 
-threading.Thread(target=run_web, daemon=True).start()
+# --- Pyrogram क्लायंट ---
+app = Client(
+    "mtc_unified_bot", 
+    api_id=30767171, 
+    api_hash="af363a055e5c68096847d64871c758c5", 
+    bot_token=os.environ.get("API_TOKEN")
+)
 
-# --- कॉन्फिग ---
-app = Client("mtc_unified_bot", api_id=30767171, api_hash="af363a055e5c68096847d64871c758c5", bot_token=os.environ.get("API_TOKEN"))
+# --- डेटाबेस सेटिंग्ज ---
 mongo_client = AsyncIOMotorClient(os.environ.get("MONGO_URI"))
 db = mongo_client.mtc_unified_db
 marathi_col, hindi_col, msg_col = db.marathi_channels, db.hindi_channels, db.messages
@@ -31,28 +35,25 @@ async def b_cast(client, message):
     if not message.reply_to_message: return await message.reply_text("❌ रिप्लाय द्या!")
     col = marathi_col if "marathi" in message.text else hindi_col
     mode = "marathi" if "marathi" in message.text else "hindi"
-    
     sent_ids = []
     sent_count = 0
-    
-    # थेट डेटाबेस कर्सर वापरून ६ चॅनेल्सना शोधणे
     async for ch in col.find({}):
         try:
             sent = await message.reply_to_message.copy(ch['chat_id'])
             sent_ids.append([ch['chat_id'], sent.id])
             sent_count += 1
-            await asyncio.sleep(2) # थोडा वेळ दिलाय जेणेकरून Telegram ब्लॉक करणार नाही
+            await asyncio.sleep(2) 
         except Exception as e:
-            print(f"Error sending to {ch['chat_id']}: {e}")
+            print(f"Error: {e}")
             continue
-        
     await msg_col.update_one({"type": mode}, {"$set": {"sent_ids": sent_ids}}, upsert=True)
-    await message.reply_text(f"✅ पूर्ण झाले! एकूण {sent_count} चॅनेल्सवर मेसेज पाठवला.")
+    await message.reply_text(f"✅ पूर्ण झाले! {sent_count} चॅनेल्स.")
 
 # --- कमांड्स ---
 @app.on_message(filters.private & filters.command("start"))
 async def start(c, m): await m.reply_text("🚀 MTC Unified Bot सक्रिय आहे!")
 
+# (इतर कमांड्स जशाच्या तशा ठेवल्या आहेत)
 @app.on_message(filters.private & filters.command(["add_marathi", "add_hindi"]))
 async def add_ch(c, m):
     col = marathi_col if "marathi" in m.text else hindi_col
@@ -77,12 +78,18 @@ async def del_cast(c, m):
 async def show_stats(c, m):
     col = marathi_col if "marathi" in m.text else hindi_col
     count = await col.count_documents({})
-    await m.reply_text(f"📊 सध्या {count} चॅनेल्स डेटाबेसमध्ये आहेत.")
+    await m.reply_text(f"📊 {count} चॅनेल्स नोंदणीकृत.")
 
+# --- सुधारित मेन लूप ---
 async def main():
     await app.start()
     print("Bot is Running...")
-    await asyncio.Event().wait()
+    # Event().wait() ऐवजी, बॉट थांबणार नाही याची खात्री करण्यासाठी हे सोपे लॉजिक
+    while True:
+        await asyncio.sleep(3600)
 
 if __name__ == "__main__":
+    # १. Flask सर्व्हर थ्रेडमध्ये सुरू करा
+    threading.Thread(target=run_web, daemon=True).start()
+    # २. बॉट रन करा
     asyncio.run(main())
