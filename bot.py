@@ -1,23 +1,23 @@
 import os
 import asyncio
 import threading
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from flask import Flask
 from pyrogram import Client, filters
 from motor.motor_asyncio import AsyncIOMotorClient
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-# --- वेब सर्व्हर ---
-class DummyHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200); self.end_headers(); self.wfile.write(b"MTC Unified Bot is Running!")
-    def do_HEAD(self):
-        self.send_response(200); self.end_headers()
+# --- वेब सर्व्हर (Keep Alive - मजबूत Flask सर्व्हर) ---
+web_app = Flask(__name__)
 
-def run_dummy_server():
-    server = HTTPServer(('0.0.0.0', int(os.environ.get("PORT", 10000))), DummyHandler)
-    server.serve_forever()
+@web_app.route('/')
+def keep_alive():
+    return "Bot is alive!", 200
 
-threading.Thread(target=run_dummy_server, daemon=True).start()
+def run_web():
+    # Render चा पोर्ट वापरून सर्व्हर रन करणे
+    web_app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+
+threading.Thread(target=run_web, daemon=True).start()
 
 # --- कॉन्फिग ---
 app = Client("mtc_unified_bot", api_id=30767171, api_hash="af363a055e5c68096847d64871c758c5", bot_token=os.environ.get("API_TOKEN"))
