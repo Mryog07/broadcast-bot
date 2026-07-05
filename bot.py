@@ -33,7 +33,7 @@ marathi_col = db.marathi_channels
 hindi_col = db.hindi_channels
 msg_col = db.messages
 
-# --- 4. ब्रॉडकास्ट फंक्शन (Full Logic) ---
+# --- 4. ब्रॉडकास्ट फंक्शन ---
 @app.on_message(filters.private & filters.command(["broadcast_marathi", "broadcast_hindi"]))
 async def b_cast(client, message):
     admin_id = int(os.environ.get("ADMIN_ID"))
@@ -74,12 +74,32 @@ async def add_ch(c, m):
         await m.reply_text(f"✅ {c_id} सेव्ह झाला!")
     except: await m.reply_text("❌ फॉरमॅट चुकीचा आहे!")
 
-# --- 6. मुख्य एक्झिक्युशन (सर्वात महत्त्वाचं) ---
+@app.on_message(filters.private & filters.command(["delete_marathi", "delete_hindi"]))
+async def del_cast(c, m):
+    mode = "marathi" if "marathi" in m.text else "hindi"
+    data = await msg_col.find_one({"type": mode})
+    if data:
+        for c_id, m_id in data["sent_ids"]:
+            try: await c.delete_messages(c_id, m_id)
+            except: pass
+        await msg_col.delete_one({"type": mode})
+        await m.reply_text("🗑️ पोस्ट डिलीट केली!")
+
+# --- 6. Stats फंक्शन ---
+@app.on_message(filters.private & filters.command(["stats_marathi", "stats_hindi"]))
+async def show_stats(c, m):
+    print("Stats command received!")
+    col = marathi_col if "marathi" in m.text else hindi_col
+    try:
+        count = await col.count_documents({})
+        await m.reply_text(f"📊 सध्या {count} चॅनेल्स डेटाबेसमध्ये आहेत.")
+    except Exception as e:
+        print(f"Stats Error: {e}")
+        await m.reply_text("❌ डेटाबेस एरर!")
+
+# --- 7. मुख्य एक्झिक्युशन ---
 if __name__ == "__main__":
-    # Flask ला बॅकग्राउंड थ्रेडमध्ये सुरू करा
     flask_thread = threading.Thread(target=run_flask, daemon=True)
     flask_thread.start()
-    
-    # बॉटला मेन प्रोसेसमध्ये सुरू करा
     print("Bot starting...")
     app.run()
